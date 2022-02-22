@@ -1,0 +1,99 @@
+#!/usr/bin/env php
+<?php
+
+/*
+ * 可转债每日数据分析器
+ *
+ * 登录集思录网站后
+ * 手动访问接口获取数据：https://www.jisilu.cn/webapi/cb/list_new
+ */
+
+//----------------------------------------------------------------------
+
+$data = file_get_contents(__DIR__ . '/data.json');
+$data = json_decode($data, true);
+$data = $data['data'];
+
+//----------------------------------------------------------------------
+
+function array_multiple_order_by($_data, $_sort)
+{
+    foreach (array_keys($_sort) as $_n) {
+        $$_n = [];
+    }
+
+    foreach ($_data as $_k => $_v) {
+        foreach (array_keys($_sort) as $_n) {
+            ${$_n}[$_k] = $_v[$_n];
+        }
+    }
+
+    $_params = [];
+    foreach ($_sort as $_n => $_s) {
+        $_params[] = $$_n;
+        $_params[] = ($_s == 'asc') ? SORT_ASC : SORT_DESC;
+    }
+    $_params[] = &$_data;
+
+    call_user_func_array('array_multisort', $_params);
+
+    return $_data;
+}
+
+//----------------------------------------------------------------------
+
+$list = [];
+
+foreach ($data as $item) {
+    $rate1   = round($item['increase_rt'], 2);  // 转债当日涨跌幅
+    $rate2   = round($item['sincrease_rt'], 2); // 正股当日涨跌幅
+    $premium = round($item['premium_rt'], 2);   // 转股溢价率
+    $redeem  = trim($item['redeem_icon']);      // 强赎标志 G:公告不强赎 空白:状态正常
+
+    // 排除可交换债
+    if ($item['btype'] !== 'C') {
+        continue;
+    }
+
+    // 满足强赎的不要
+    if (!in_array($redeem, ['', 'G'])) {
+        continue;
+    }
+
+    // 溢价过高的不要
+    if ($premium >= 30) {
+        continue;
+    }
+
+    // 没有下跌的不要
+    if ($rate1 >= 0 || $rate2 >= 0) {
+        continue;
+    }
+
+    // 转债跌得没有正股多的不要
+    if ($rate1 >= $rate2) {
+        continue;
+    }
+
+    $list[] = $item;
+}
+
+// 按跌幅排序
+$list = array_multiple_order_by($list, ['increase_rt' => 'asc']);
+
+// 只展示排最前面的15个标的
+$list = array_slice($list, 0, 15);
+
+//----------------------------------------------------------------------
+
+echo '-------------------------------------------------------------------------' . PHP_EOL;
+printf(" %s |  %s  | %s | %s | %s | %s | %s |\n", '序号', '代码', '转债名称', '转债涨跌幅', '正股名称', '正股涨跌幅', '溢价率');
+echo '-------------------------------------------------------------------------' . PHP_EOL;
+
+foreach ($list as $key => $item) {
+    printf("  %2d  | %s | %-11s |   %6.2f   | %-11s |   %6.2f   | %6.2f |\n", $key + 1, $item['bond_id'], $item['bond_nm'], $item['increase_rt'], $item['stock_nm'], $item['sincrease_rt'], $item['premium_rt']);
+}
+
+echo '-------------------------------------------------------------------------' . PHP_EOL;
+
+//----------------------------------------------------------------------
